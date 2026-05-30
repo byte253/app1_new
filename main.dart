@@ -760,7 +760,7 @@ class _ObrazovkaCatuState extends State<ObrazovkaCatu> {
     );
   }
 
-  // ✅ OPRAVENÁ FUNKCIA NA MAZANIE HISTORIE
+  // ✅ OPRAVENÁ FUNKCIA NA MAZANIE HISTÓRIE - VYMAŽ NOVÉ!
   void _zobrazitMazanieHistorie() {
     showDialog(
       context: context,
@@ -788,69 +788,69 @@ class _ObrazovkaCatuState extends State<ObrazovkaCatu> {
               style: TextStyle(color: Colors.redAccent),
             ),
           ),
-          // TLACITKO 2 - Poslednych 7 dni (OPRAVENÉ)
+          // TLACITKO 2 - Vymaž posledných 7 dní (NOVÉ sprievania z posledných 7 dní)
           TextButton(
             onPressed: () {
               int sedemDniMs = 7 * 24 * 60 * 60 * 1000;
               int casLimit = DateTime.now().millisecondsSinceEpoch - sedemDniMs;
 
               setState(() {
-                // ✅ OPRAVA: Vymazuj len to čo je STARŠIE ako 7 dni
+                // ✅ OPRAVA: Vymazuj sprievania ktoré sú NOVŠIE ako 7 dní
                 _sifrovanaHistoria.removeWhere(
-                  (z) => z.casovy_razitko < casLimit,
+                  (z) => z.casovy_razitko > casLimit,
                 );
                 _zobrazovaneSpravy.removeWhere(
                   (z) =>
                       (z['casovy_razitko'] ??
-                          DateTime.now().millisecondsSinceEpoch) <
+                          DateTime.now().millisecondsSinceEpoch) >
                       casLimit,
                 );
               });
               Navigator.pop(context);
               ScaffoldMessenger.of(context).showSnackBar(
                 const SnackBar(
-                  content: Text('Historia starsia ako 7 dni bola vymazana'),
+                  content: Text('Sprievania z poslednich 7 dni boli vymazane'),
                   backgroundColor: Colors.orangeAccent,
                 ),
               );
             },
             child: const Text(
-              'Poslednich 7 Dni',
+              'Poslednych 7 Dni',
               style: TextStyle(color: Colors.orangeAccent),
             ),
           ),
-          // TLACITKO 3 - Poslednych 24 hodin (OPRAVENÉ)
+          // TLACITKO 3 - Vymaž posledných 24 hodín (NOVÉ sprievania z posledného dňa)
           TextButton(
             onPressed: () {
               int jedanDenMs = 24 * 60 * 60 * 1000;
               int casLimit = DateTime.now().millisecondsSinceEpoch - jedanDenMs;
 
               setState(() {
-                // ✅ OPRAVA: Vymazuj len to čo je STARŠIE ako 24 hodín
+                // ✅ OPRAVA: Vymazuj sprievania ktoré sú NOVŠIE ako 24 hodín
                 _sifrovanaHistoria.removeWhere(
-                  (z) => z.casovy_razitko < casLimit,
+                  (z) => z.casovy_razitko > casLimit,
                 );
                 _zobrazovaneSpravy.removeWhere(
                   (z) =>
                       (z['casovy_razitko'] ??
-                          DateTime.now().millisecondsSinceEpoch) <
+                          DateTime.now().millisecondsSinceEpoch) >
                       casLimit,
                 );
               });
               Navigator.pop(context);
               ScaffoldMessenger.of(context).showSnackBar(
                 const SnackBar(
-                  content: Text('Historia starsia ako 24 hodin bola vymazana'),
+                  content: Text('Sprievania z poslednich 24 hodin boli vymazane'),
                   backgroundColor: Colors.amberAccent,
                 ),
               );
             },
             child: const Text(
-              'Poslednich 24 Hodin',
+              'Poslednych 24 Hodin',
               style: TextStyle(color: Colors.amberAccent),
             ),
           ),
-          // TLACITKO 4 - Posledna 1 hodina (OPRAVENÉ)
+          // TLACITKO 4 - Vymaž poslednú 1 hodinu (NOVÉ sprievania z poslednej hodiny)
           TextButton(
             onPressed: () {
               int jednaHodinaMs = 60 * 60 * 1000;
@@ -858,21 +858,21 @@ class _ObrazovkaCatuState extends State<ObrazovkaCatu> {
                   DateTime.now().millisecondsSinceEpoch - jednaHodinaMs;
 
               setState(() {
-                // ✅ OPRAVA: Vymazuj len to čo je STARŠIE ako 1 hodina
+                // ✅ OPRAVA: Vymazuj sprievania ktoré sú NOVŠIE ako 1 hodina
                 _sifrovanaHistoria.removeWhere(
-                  (z) => z.casovy_razitko < casLimit,
+                  (z) => z.casovy_razitko > casLimit,
                 );
                 _zobrazovaneSpravy.removeWhere(
                   (z) =>
                       (z['casovy_razitko'] ??
-                          DateTime.now().millisecondsSinceEpoch) <
+                          DateTime.now().millisecondsSinceEpoch) >
                       casLimit,
                 );
               });
               Navigator.pop(context);
               ScaffoldMessenger.of(context).showSnackBar(
                 const SnackBar(
-                  content: Text('Historia starsia ako 1 hodina bola vymazana'),
+                  content: Text('Sprievania z poslednei 1 hodiny boli vymazane'),
                   backgroundColor: Colors.greenAccent,
                 ),
               );
