@@ -11,79 +11,316 @@ class BezpecnyChatApp extends StatelessWidget {
   Widget build(BuildContext context) {
     return MaterialApp(
       theme: ThemeData.dark(),
-      home: const TestDemoHistorie(),
+      home: const ObravovkaKontaktov(),
     );
   }
 }
 
-// 🧪 TESTOVACIA OBRAZOVKA - DEMO MAZANIA HISTÓRIE BEZ HARDVÉRU
-class TestDemoHistorie extends StatefulWidget {
-  const TestDemoHistorie({super.key});
+// Šifrovacia utility trieda s AES-256
+class SifrovaciaSluzba {
+  static const String _defaultKluc =
+      "tajnyKlucPre256bitovuSifruAES!!"; // min 32 znakov
 
-  @override
-  State<TestDemoHistorie> createState() => _TestDemoHistorieState();
+  static String sifrovajAES(String text, [String? kluc]) {
+    try {
+      final key = encrypt.Key.fromUtf8(kluc ?? _defaultKluc);
+      final iv = encrypt.IV.fromSecureRandom(16);
+      final encrypter = encrypt.Encrypter(
+        encrypt.AES(key, mode: encrypt.AESMode.cbc),
+      );
+
+      final encrypted = encrypter.encrypt(text, iv: iv);
+      final kombinovane = iv.base64 + ':' + encrypted.base64;
+
+      return base64Encode(utf8.encode(kombinovane));
+    } catch (e) {
+      return "CHYBA_SIFRVANIA: $e";
+    }
+  }
+
+  static String desifrovajAES(String sifrovanyText, [String? kluc]) {
+    try {
+      final dekodovane = utf8.decode(base64Decode(sifrovanyText));
+      final casti = dekodovane.split(':');
+
+      if (casti.length != 2) return "CHYBA_DESIFRVANIA";
+
+      final iv = encrypt.IV.fromBase64(casti[0]);
+      final encrypted = encrypt.Encrypted.fromBase64(casti[1]);
+      final key = encrypt.Key.fromUtf8(kluc ?? _defaultKluc);
+      final encrypter = encrypt.Encrypter(
+        encrypt.AES(key, mode: encrypt.AESMode.cbc),
+      );
+
+      return encrypter.decrypt(encrypted, iv: iv);
+    } catch (e) {
+      return "CHYBA_DESIFRVANIA: $e";
+    }
+  }
+
+  static String generujHash(String text) {
+    int hash = 0;
+    for (int i = 0; i < text.length; i++) {
+      hash = ((hash << 5) - hash) + text.codeUnitAt(i);
+      hash = hash & hash;
+    }
+    return hash.abs().toRadixString(16);
+  }
 }
 
-class _TestDemoHistorieState extends State<TestDemoHistorie> {
-  final List<Map<String, dynamic>> _testSpravy = [];
+// Trieda pre uloženie šifrovanej histórie
+class SpravaZaznam {
+  final String id;
+  final String sifrovanyObsah;
+  final String sifrovanaPoloha;
+  final String typ;
+  final String smer;
+  final int casovy_razitko;
+  final String hash;
+  final String? kontakt; // pre skúpňovanie podľa kontaktu
+  double? lat;
+  double? lon;
+
+  SpravaZaznam({
+    required this.id,
+    required this.sifrovanyObsah,
+    required this.sifrovanaPoloha,
+    required this.typ,
+    required this.smer,
+    required this.casovy_razitko,
+    required this.hash,
+    this.kontakt,
+    this.lat,
+    this.lon,
+  });
+
+  Map<String, dynamic> toJson() => {
+    'id': id,
+    'obsah': sifrovanyObsah,
+    'poloha': sifrovanaPoloha,
+    'typ': typ,
+    'smer': smer,
+    'cas': casovy_razitko,
+    'hash': hash,
+    'kontakt': kontakt,
+    'lat': lat,
+    'lon': lon,
+  };
+
+  static SpravaZaznam fromJson(Map<String, dynamic> json) {
+    return SpravaZaznam(
+      id: json['id'],
+      sifrovanyObsah: json['obsah'],
+      sifrovanaPoloha: json['poloha'],
+      typ: json['typ'],
+      smer: json['smer'],
+      casovy_razitko: json['cas'],
+      hash: json['hash'],
+      kontakt: json['kontakt'],
+      lat: json['lat'],
+      lon: json['lon'],
+    );
+  }
+}
+
+// Trieda pre mapu - poloha bodu
+class PolohaBodu {
+  final String nazov;
+  final double lat;
+  final double lon;
+  final int casovy_razitko;
+  final String typ; // "kontakt" alebo "vystraha"
+  final Color farba;
+  final String? meno;
+
+  PolohaBodu({
+    required this.nazov,
+    required this.lat,
+    required this.lon,
+    required this.casovy_razitko,
+    required this.typ,
+    required this.farba,
+    this.meno,
+  });
+}
+
+// 🔧 GLOBÁLNA PAMÄŤ PRE HISTÓRIE KAŽDÉHO KONTAKTU
+class HistoriaKontaktov {
+  static final Map<String, Map<String, List<dynamic>>> _historiaMap = {};
+
+  static List<SpravaZaznam> getSifrovanaHistoria(String kontakt) {
+    _historiaMap.putIfAbsent(
+      kontakt,
+      () => {
+        'sifrovana': <SpravaZaznam>[],
+        'zobrazovane': <Map<String, dynamic>>[],
+      },
+    );
+    return List<SpravaZaznam>.from(
+      _historiaMap[kontakt]!['sifrovana'] as List<SpravaZaznam>,
+    );
+  }
+
+  static List<Map<String, dynamic>> getZobrazovaneSpravy(String kontakt) {
+    _historiaMap.putIfAbsent(
+      kontakt,
+      () => {
+        'sifrovana': <SpravaZaznam>[],
+        'zobrazovane': <Map<String, dynamic>>[],
+      },
+    );
+    return List<Map<String, dynamic>>.from(
+      _historiaMap[kontakt]!['zobrazovane'] as List<Map<String, dynamic>>,
+    );
+  }
+
+  static void addSifrovanaSprava(String kontakt, SpravaZaznam sprava) {
+    _historiaMap.putIfAbsent(
+      kontakt,
+      () => {
+        'sifrovana': <SpravaZaznam>[],
+        'zobrazovane': <Map<String, dynamic>>[],
+      },
+    );
+    (_historiaMap[kontakt]!['sifrovana'] as List<SpravaZaznam>).add(sprava);
+  }
+
+  static void addZobrazovanaSprava(
+    String kontakt,
+    Map<String, dynamic> sprava,
+  ) {
+    _historiaMap.putIfAbsent(
+      kontakt,
+      () => {
+        'sifrovana': <SpravaZaznam>[],
+        'zobrazovane': <Map<String, dynamic>>[],
+      },
+    );
+    (_historiaMap[kontakt]!['zobrazovane'] as List<Map<String, dynamic>>)
+        .add(sprava);
+  }
+
+  static void clearSifrovanaHistoria(String kontakt) {
+    if (_historiaMap.containsKey(kontakt)) {
+      (_historiaMap[kontakt]!['sifrovana'] as List<SpravaZaznam>).clear();
+    }
+  }
+
+  static void clearZobrazovaneSpravy(String kontakt) {
+    if (_historiaMap.containsKey(kontakt)) {
+      (_historiaMap[kontakt]!['zobrazovane'] as List<Map<String, dynamic>>)
+          .clear();
+    }
+  }
+
+  static void removeWhereFromSifrovana(
+    String kontakt,
+    bool Function(SpravaZaznam) test,
+  ) {
+    if (_historiaMap.containsKey(kontakt)) {
+      (_historiaMap[kontakt]!['sifrovana'] as List<SpravaZaznam>)
+          .removeWhere(test);
+    }
+  }
+
+  static void removeWhereFromZobrazovane(
+    String kontakt,
+    bool Function(Map<String, dynamic>) test,
+  ) {
+    if (_historiaMap.containsKey(kontakt)) {
+      (_historiaMap[kontakt]!['zobrazovane'] as List<Map<String, dynamic>>)
+          .removeWhere(test);
+    }
+  }
+}
+
+class ObravovkaKontaktov extends StatefulWidget {
+  const ObravovkaKontaktov({super.key});
+  @override
+  State<ObravovkaKontaktov> createState() => _ObravovkaKontaktovState();
+}
+
+class _ObravovkaKontaktovState extends State<ObravovkaKontaktov> {
+  String _mojaPrezyvka = "Novy_Pouzivatel";
+  static List<Map<String, dynamic>> vystrahyVlny = [];
+
+  // Polohy kontaktov
+  final Map<String, Map<String, dynamic>> _polohy = {
+    "Kamarát 1 (ALFA)": {"lat": 48.8566, "lon": 2.3522, "cas": null},
+    "Kamarát 2 (BETA)": {"lat": 48.8944, "lon": 2.3912, "cas": null},
+    "Základňa DOM": {"lat": 48.8700, "lon": 2.3550, "cas": null},
+  };
+
+  final List<Map<String, String>> _kamarati = [
+    {"meno": "Kamarát 1 (ALFA)", "status": "Online v Mesh sieti"},
+    {"meno": "Kamarát 2 (BETA)", "status": "Vzdialený cez opakovač"},
+    {"meno": "Základňa DOM", "status": "Stabilný uzol"},
+  ];
 
   @override
   void initState() {
     super.initState();
-    _initTestDemoData();
+    _initDemoVystrahy();
   }
 
-  void _initTestDemoData() {
-    int now = DateTime.now().millisecondsSinceEpoch;
-    
-    // Staršie ako 30 dní
-    _testSpravy.add({
-      "obsah": "Správa z 35 dní nazpäť",
-      "cas": now - (35 * 24 * 60 * 60 * 1000),
-      "kategoria": "VEĽMI STARÁ",
+  void _initDemoVystrahy() {
+    if (vystrahyVlny.isEmpty) {
+      vystrahyVlny = [
+        {"vzdialenost": 5.5, "citatelny": true, "obsah": "Signal z Blizko"},
+        {"vzdialenost": 25.3, "citatelny": false, "obsah": ""},
+        {"vzdialenost": 85.7, "citatelny": false, "obsah": ""},
+        {"vzdialenost": 12.1, "citatelny": true, "obsah": "Neznama frekvencia"},
+      ];
+    }
+  }
+
+  List<PolohaBodu> _getMapoveBody() {
+    List<PolohaBodu> body = [];
+
+    // Kontakty
+    _polohy.forEach((meno, data) {
+      if (data['lat'] != null && data['lon'] != null) {
+        body.add(
+          PolohaBodu(
+            nazov: meno,
+            lat: data['lat'],
+            lon: data['lon'],
+            casovy_razitko:
+                data['cas'] ?? DateTime.now().millisecondsSinceEpoch,
+            typ: "kontakt",
+            farba: Colors.blueAccent,
+            meno: meno,
+          ),
+        );
+      }
     });
-    
-    // Staršie ako 14 dní
-    _testSpravy.add({
-      "obsah": "Správa z 14 dní nazpäť",
-      "cas": now - (14 * 24 * 60 * 60 * 1000),
-      "kategoria": "STARÁ",
-    });
-    
-    // Staršie ako 7 dní
-    _testSpravy.add({
-      "obsah": "Správa z 8 dní nazpäť",
-      "cas": now - (8 * 24 * 60 * 60 * 1000),
-      "kategoria": "STARÁ",
-    });
-    
-    // V posledných 7 dní ale staršie ako 24h
-    _testSpravy.add({
-      "obsah": "Správa z 2 dni nazpäť",
-      "cas": now - (2 * 24 * 60 * 60 * 1000),
-      "kategoria": "NOVÁ (V POSLEDNÝCH 7 DŇOCH)",
-    });
-    
-    // V posledných 24h ale staršie ako 1h
-    _testSpravy.add({
-      "obsah": "Správa z 5 hodín nazpäť",
-      "cas": now - (5 * 60 * 60 * 1000),
-      "kategoria": "NOVÁ (V POSLEDNÝCH 24 HODINÁCH)",
-    });
-    
-    // V poslednej 1h ale staršie ako 10 min
-    _testSpravy.add({
-      "obsah": "Správa z 30 minút nazpäť",
-      "cas": now - (30 * 60 * 1000),
-      "kategoria": "NOVÁ (V POSLEDNEJ 1 HODINE)",
-    });
-    
-    // Ultra čerstvá - teraz
-    _testSpravy.add({
-      "obsah": "Správa práve teraz",
-      "cas": now,
-      "kategoria": "VEĽMI NOVÁ",
-    });
+
+    // Výstrahy (posledné 3)
+    List<Map<String, dynamic>> posledneVystrahy = List.from(vystrahyVlny);
+    posledneVystrahy.sort(
+      (a, b) => (b['vzdialenost'] ?? 0).compareTo(a['vzdialenost'] ?? 0),
+    );
+
+    for (int i = 0; i < min(3, posledneVystrahy.length); i++) {
+      final v = posledneVystrahy[i];
+      double dist = v["vzdialenost"] ?? 0;
+      Color farba = dist <= 15
+          ? Colors.redAccent
+          : (dist <= 50 ? Colors.yellowAccent : Colors.greenAccent);
+
+      body.add(
+        PolohaBodu(
+          nazov: "Vystraha ${i + 1}",
+          lat: 48.8566 + (Random().nextDouble() * 0.1 - 0.05),
+          lon: 2.3522 + (Random().nextDouble() * 0.1 - 0.05),
+          casovy_razitko: DateTime.now().millisecondsSinceEpoch,
+          typ: "vystraha",
+          farba: farba,
+        ),
+      );
+    }
+
+    return body;
   }
 
   String _formatujCas(int timestamp) {
@@ -91,93 +328,733 @@ class _TestDemoHistorieState extends State<TestDemoHistorie> {
     return "${cas.day}.${cas.month}.${cas.year} ${cas.hour}:${cas.minute.toString().padLeft(2, '0')}";
   }
 
-  String _koľkoČasuNazad(int timestamp) {
-    int now = DateTime.now().millisecondsSinceEpoch;
-    int rozdiel = now - timestamp;
-    
-    int dni = (rozdiel / (24 * 60 * 60 * 1000)).floor();
-    int hodiny = ((rozdiel % (24 * 60 * 60 * 1000)) / (60 * 60 * 1000)).floor();
-    int minuty = ((rozdiel % (60 * 60 * 1000)) / (60 * 1000)).floor();
-    
-    if (dni > 0) return "pred $dni dňami";
-    if (hodiny > 0) return "pred $hodiny hodinami";
-    if (minuty > 0) return "pred $minuty minútami";
-    return "teraz";
+  @override
+  Widget build(BuildContext context) {
+    return Scaffold(
+      appBar: AppBar(
+        title: const Text('📡 Radiovi Kamaradi'),
+        backgroundColor: Colors.blueGrey,
+      ),
+      body: Column(
+        children: [
+          Container(
+            padding: const EdgeInsets.all(12),
+            color: Colors.black26,
+            child: Row(
+              children: [
+                const Icon(Icons.radio, color: Colors.greenAccent),
+                const SizedBox(width: 10),
+                Text('Tvoj volaci znak: $_mojaPrezyvka'),
+              ],
+            ),
+          ),
+          Expanded(
+            child: ListView(
+              children: [
+                // MAPA - ŽLTÁ FARBA
+                ListTile(
+                  leading: const CircleAvatar(
+                    backgroundColor: Colors.amber,
+                    child: Icon(Icons.map, color: Colors.black),
+                  ),
+                  title: const Text(
+                    'MAP - Mapy',
+                    style: TextStyle(
+                      fontWeight: FontWeight.bold,
+                      color: Colors.amber,
+                    ),
+                  ),
+                  subtitle: const Text('Polohy kontaktov a vystraho'),
+                  trailing: const Icon(
+                    Icons.chevron_right,
+                    color: Colors.amber,
+                  ),
+                  onTap: () => Navigator.push(
+                    context,
+                    MaterialPageRoute(
+                      builder: (context) => MapovyScreen(
+                        body: _getMapoveBody(),
+                        formatCas: _formatujCas,
+                      ),
+                    ),
+                  ),
+                ),
+                const Divider(),
+
+                // VÝSTRAHY
+                ListTile(
+                  leading: const CircleAvatar(
+                    backgroundColor: Colors.red,
+                    child: Icon(Icons.warning, color: Colors.white),
+                  ),
+                  title: const Text(
+                    'VYSTRAHA - Nezname pakety',
+                    style: TextStyle(
+                      fontWeight: FontWeight.bold,
+                      color: Colors.red,
+                    ),
+                  ),
+                  subtitle: const Text('Pasivny radar eteru'),
+                  trailing: const Icon(Icons.chevron_right, color: Colors.red),
+                  onTap: () => Navigator.push(
+                    context,
+                    MaterialPageRoute(
+                      builder: (context) =>
+                          ObrazovkaVystrah(vystrahy: vystrahyVlny),
+                    ),
+                  ),
+                ),
+                const Divider(),
+
+                // KONTAKTY
+                ..._kamarati.map(
+                  (k) => ListTile(
+                    leading: const CircleAvatar(
+                      backgroundColor: Colors.blueAccent,
+                      child: Icon(Icons.person),
+                    ),
+                    title: Text(
+                      k["meno"]!,
+                      style: const TextStyle(fontWeight: FontWeight.bold),
+                    ),
+                    subtitle: Text(k["status"]!),
+                    trailing: const Icon(
+                      Icons.chevron_right,
+                      color: Colors.blueAccent,
+                    ),
+                    onTap: () => Navigator.push(
+                      context,
+                      MaterialPageRoute(
+                        builder: (context) => ObrazovkaCatu(
+                          menoKamaranda: k["meno"]!,
+                          onCudziPaketZachyteny: (nv) =>
+                              setState(() => vystrahyVlny.add(nv)),
+                          onPolohaZachytena: (lat, lon, cas) {
+                            setState(() {
+                              _polohy[k["meno"]!] = {
+                                "lat": lat,
+                                "lon": lon,
+                                "cas": cas,
+                              };
+                            });
+                          },
+                        ),
+                      ),
+                    ),
+                  ),
+                ),
+              ],
+            ),
+          ),
+        ],
+      ),
+    );
+  }
+}
+
+// NOVÁ OBRAZOVKA - OFFLINE MAPA
+class MapovyScreen extends StatelessWidget {
+  final List<PolohaBodu> body;
+  final Function(int) formatCas;
+
+  const MapovyScreen({super.key, required this.body, required this.formatCas});
+
+  @override
+  Widget build(BuildContext context) {
+    return Scaffold(
+      appBar: AppBar(
+        title: const Text('Offline Mapa - Polohy a Vystrahy'),
+        backgroundColor: Colors.amber,
+      ),
+      body: body.isEmpty
+          ? const Center(child: Text('Ziadne polohy na mape.'))
+          : Column(
+              children: [
+                Expanded(
+                  child: Container(
+                    color: Colors.grey[800],
+                    child: Stack(
+                      children: [
+                        // Pozadie mapy
+                        Center(
+                          child: Column(
+                            mainAxisAlignment: MainAxisAlignment.center,
+                            children: [
+                              Icon(
+                                Icons.map,
+                                size: 80,
+                                color: Colors.grey[600],
+                              ),
+                              const SizedBox(height: 10),
+                              const Text(
+                                'Offline mapa - Pariz',
+                                style: TextStyle(
+                                  color: Colors.white70,
+                                  fontSize: 16,
+                                ),
+                              ),
+                            ],
+                          ),
+                        ),
+                        // Body na mape (simulácia pozícií)
+                        ...body.map((bod) {
+                          // Simulácia pozícií na mape (0-100%)
+                          double x = ((bod.lon - 2.25) / 0.45) * 100;
+                          double y = ((bod.lat - 48.75) / 0.25) * 100;
+
+                          x = x.clamp(5, 95);
+                          y = y.clamp(5, 95);
+
+                          return Positioned(
+                            left: (x / 100) * MediaQuery.of(context).size.width,
+                            top:
+                                (y / 100) *
+                                (MediaQuery.of(context).size.height - 200),
+                            child: Column(
+                              children: [
+                                Container(
+                                  width: 40,
+                                  height: 40,
+                                  decoration: BoxDecoration(
+                                    shape: BoxShape.circle,
+                                    color: bod.farba,
+                                    border: Border.all(
+                                      color: Colors.white,
+                                      width: 2,
+                                    ),
+                                    boxShadow: [
+                                      BoxShadow(
+                                        color: bod.farba.withOpacity(0.5),
+                                        blurRadius: 8,
+                                        spreadRadius: 2,
+                                      ),
+                                    ],
+                                  ),
+                                  child: Center(
+                                    child: bod.typ == "kontakt"
+                                        ? const Icon(
+                                            Icons.person,
+                                            size: 20,
+                                            color: Colors.white,
+                                          )
+                                        : const Icon(
+                                            Icons.warning,
+                                            size: 20,
+                                            color: Colors.black,
+                                          ),
+                                  ),
+                                ),
+                                const SizedBox(height: 4),
+                                Container(
+                                  padding: const EdgeInsets.symmetric(
+                                    horizontal: 6,
+                                    vertical: 2,
+                                  ),
+                                  decoration: BoxDecoration(
+                                    color: Colors.black87,
+                                    borderRadius: BorderRadius.circular(4),
+                                  ),
+                                  child: Column(
+                                    children: [
+                                      Text(
+                                        bod.meno ?? bod.nazov,
+                                        style: const TextStyle(
+                                          color: Colors.white,
+                                          fontSize: 10,
+                                          fontWeight: FontWeight.bold,
+                                        ),
+                                      ),
+                                      Text(
+                                        formatCas(bod.casovy_razitko),
+                                        style: const TextStyle(
+                                          color: Colors.white70,
+                                          fontSize: 8,
+                                        ),
+                                      ),
+                                    ],
+                                  ),
+                                ),
+                              ],
+                            ),
+                          );
+                        }).toList(),
+                      ],
+                    ),
+                  ),
+                ),
+                // Legenda
+                Container(
+                  padding: const EdgeInsets.all(12),
+                  color: Colors.black26,
+                  child: Column(
+                    crossAxisAlignment: CrossAxisAlignment.start,
+                    children: [
+                      const Text(
+                        'Legenda:',
+                        style: TextStyle(
+                          fontWeight: FontWeight.bold,
+                          color: Colors.amber,
+                        ),
+                      ),
+                      const SizedBox(height: 8),
+                      Row(
+                        children: [
+                          Container(
+                            width: 24,
+                            height: 24,
+                            decoration: const BoxDecoration(
+                              shape: BoxShape.circle,
+                              color: Colors.blueAccent,
+                            ),
+                          ),
+                          const SizedBox(width: 8),
+                          const Text(
+                            'Kontakty',
+                            style: TextStyle(fontSize: 12),
+                          ),
+                          const SizedBox(width: 24),
+                          Container(
+                            width: 24,
+                            height: 24,
+                            decoration: const BoxDecoration(
+                              shape: BoxShape.circle,
+                              color: Colors.greenAccent,
+                            ),
+                          ),
+                          const SizedBox(width: 8),
+                          const Text(
+                            'Vystraha - Daleko',
+                            style: TextStyle(fontSize: 12),
+                          ),
+                        ],
+                      ),
+                      const SizedBox(height: 8),
+                      Row(
+                        children: [
+                          Container(
+                            width: 24,
+                            height: 24,
+                            decoration: const BoxDecoration(
+                              shape: BoxShape.circle,
+                              color: Colors.yellowAccent,
+                            ),
+                          ),
+                          const SizedBox(width: 8),
+                          const Text(
+                            'Vystraha - Stredno',
+                            style: TextStyle(fontSize: 12),
+                          ),
+                          const SizedBox(width: 20),
+                          Container(
+                            width: 24,
+                            height: 24,
+                            decoration: const BoxDecoration(
+                              shape: BoxShape.circle,
+                              color: Colors.redAccent,
+                            ),
+                          ),
+                          const SizedBox(width: 8),
+                          const Text(
+                            'Vystraha - Blizko',
+                            style: TextStyle(fontSize: 12),
+                          ),
+                        ],
+                      ),
+                    ],
+                  ),
+                ),
+              ],
+            ),
+    );
+  }
+}
+
+class ObrazovkaCatu extends StatefulWidget {
+  final String menoKamaranda;
+  final Function(Map<String, dynamic>) onCudziPaketZachyteny;
+  final Function(double, double, int) onPolohaZachytena;
+
+  const ObrazovkaCatu({
+    super.key,
+    required this.menoKamaranda,
+    required this.onCudziPaketZachyteny,
+    required this.onPolohaZachytena,
+  });
+
+  @override
+  State<ObrazovkaCatu> createState() => _ObrazovkaCatuState();
+}
+
+class _ObrazovkaCatuState extends State<ObrazovkaCatu> {
+  final TextEditingController _textController = TextEditingController();
+  final double _mojeLat = 48.8566;
+  final double _mojeLon = 2.3522;
+  double? _kamarandLat;
+  double? _kamarandLon;
+  String _vzdialenostVListe = "Poloha neznama";
+
+  String _generujID() {
+    return DateTime.now().millisecondsSinceEpoch.toString();
   }
 
-  void _mazanieTest(String typMazania) {
-    int now = DateTime.now().millisecondsSinceEpoch;
-    int casLimit = now;
-    String titulok = "";
-    String popis = "";
+  double _vypocitajVzdialenostCislo(
+    double lat1,
+    double lon1,
+    double lat2,
+    double lon2,
+  ) {
+    var p = 0.017453292519943295;
+    var c = cos;
+    var a =
+        0.5 -
+        c((lat2 - lat1) * p) / 2 +
+        c(lat1 * p) * c(lat2 * p) * (1 - c((lon2 - lon1) * p)) / 2;
+    return 12742 * asin(sqrt(a));
+  }
 
-    if (typMazania == "7dni") {
-      int sedemDniMs = 7 * 24 * 60 * 60 * 1000;
-      casLimit = now - sedemDniMs;
-      titulok = "TEST: Vymaž posledných 7 DNÍ";
-      popis = "VYMAŽ: Sprievania z posledných 7 dní (cas > casLimit)\n"
-          "ZACHOV: Sprievania staršie ako 7 dní\n\n";
-    } else if (typMazania == "24h") {
-      int jedanDenMs = 24 * 60 * 60 * 1000;
-      casLimit = now - jedanDenMs;
-      titulok = "TEST: Vymaž posledných 24 HODÍN";
-      popis = "VYMAŽ: Sprievania z posledných 24 hodín (cas > casLimit)\n"
-          "ZACHOV: Sprievania staršie ako 24 hodín\n\n";
-    } else if (typMazania == "1h") {
-      int jednaHodinaMs = 60 * 60 * 1000;
-      casLimit = now - jednaHodinaMs;
-      titulok = "TEST: Vymaž poslednú 1 HODINU";
-      popis = "VYMAŽ: Sprievania z poslednej 1 hodiny (cas > casLimit)\n"
-          "ZACHOV: Sprievania staršie ako 1 hodina\n\n";
-    }
+  String _formatujCas(int timestamp) {
+    DateTime cas = DateTime.fromMillisecondsSinceEpoch(timestamp);
+    return "${cas.day}.${cas.month}.${cas.year} ${cas.hour}:${cas.minute.toString().padLeft(2, '0')}";
+  }
 
-    List<Map<String, dynamic>> vymaze = [];
-    List<Map<String, dynamic>> zachova = [];
+  void _odoslatPolohu() {
+    String polohaText = "GPS:$_mojeLat,$_mojeLon";
+    String sifrovanaPoloha = SifrovaciaSluzba.sifrovajAES(polohaText);
+    String hash = SifrovaciaSluzba.generujHash(polohaText);
+    int casNow = DateTime.now().millisecondsSinceEpoch;
 
-    for (var sp in _testSpravy) {
-      bool vymaza = sp['cas'] > casLimit;
-      if (vymaza) {
-        vymaze.add(sp);
-      } else {
-        zachova.add(sp);
+    SpravaZaznam zaznam = SpravaZaznam(
+      id: _generujID(),
+      sifrovanyObsah: SifrovaciaSluzba.sifrovajAES("Zdielam moju polohu"),
+      sifrovanaPoloha: sifrovanaPoloha,
+      typ: "poloha",
+      smer: "odoslana",
+      casovy_razitko: casNow,
+      hash: hash,
+      kontakt: widget.menoKamaranda,
+      lat: _mojeLat,
+      lon: _mojeLon,
+    );
+
+    setState(() {
+      HistoriaKontaktov.addSifrovanaSprava(widget.menoKamaranda, zaznam);
+      HistoriaKontaktov.addZobrazovanaSprava(widget.menoKamaranda, {
+        "typ": "poloha",
+        "smer": "odoslana",
+        "obsah": "Zdielam moju polohu",
+        "sifra": sifrovanaPoloha.substring(0, 30) + "...",
+        "desifrovaneSifra": sifrovanaPoloha,
+        "casovy_razitko": casNow,
+      });
+    });
+
+    widget.onPolohaZachytena(_mojeLat, _mojeLon, casNow);
+
+    Future.delayed(const Duration(seconds: 1), () {
+      if (mounted) {
+        setState(() {
+          _kamarandLat = 48.8944;
+          _kamarandLon = 2.3912;
+          int casKamarada = DateTime.now().millisecondsSinceEpoch;
+
+          _vzdialenostVListe =
+              "${_vypocitajVzdialenostCislo(_mojeLat, _mojeLon, _kamarandLat!, _kamarandLon!).toStringAsFixed(2)} km";
+
+          String kamaradPoloha = "GPS:$_kamarandLat,$_kamarandLon";
+          String sifrovanaKamaradLokal = SifrovaciaSluzba.sifrovajAES(
+            kamaradPoloha,
+          );
+          String hashKamarad = SifrovaciaSluzba.generujHash(kamaradPoloha);
+
+          SpravaZaznam zaznnamKamarad = SpravaZaznam(
+            id: _generujID(),
+            sifrovanyObsah: SifrovaciaSluzba.sifrovajAES("Kamarad poslal polohu"),
+            sifrovanaPoloha: sifrovanaKamaradLokal,
+            typ: "poloha",
+            smer: "prijata",
+            casovy_razitko: casKamarada,
+            hash: hashKamarad,
+            kontakt: widget.menoKamaranda,
+            lat: _kamarandLat,
+            lon: _kamarandLon,
+          );
+
+          HistoriaKontaktov.addSifrovanaSprava(widget.menoKamaranda, zaznnamKamarad);
+          HistoriaKontaktov.addZobrazovanaSprava(widget.menoKamaranda, {
+            "typ": "poloha",
+            "smer": "prijata",
+            "obsah": "Kamarad poslal polohu",
+            "sifra": sifrovanaKamaradLokal.substring(0, 30) + "...",
+            "desifrovaneSifra": sifrovanaKamaradLokal,
+            "casovy_razitko": casKamarada,
+          });
+
+          widget.onPolohaZachytena(_kamarandLat!, _kamarandLon!, casKamarada);
+        });
       }
-    }
+    });
 
-    String rezultat = popis + "=== VÝSLEDOK ===\n\n";
-    
-    if (vymaze.isNotEmpty) {
-      rezultat += "🗑️ VYMAZANÉ (${vymaze.length} sprievania):\n";
-      for (var sp in vymaze) {
-        rezultat += "  ✗ ${sp['obsah']} (${_koľkoČasuNazad(sp['cas'])})\n";
-      }
-      rezultat += "\n";
-    }
-    
-    if (zachova.isNotEmpty) {
-      rezultat += "✅ ZACHOVANÉ (${zachova.length} sprievania):\n";
-      for (var sp in zachova) {
-        rezultat += "  ✓ ${sp['obsah']} (${_koľkoČasuNazad(sp['cas'])})\n";
-      }
-    }
+    ScaffoldMessenger.of(context).showSnackBar(
+      const SnackBar(
+        content: Text('Poloha odoslana'),
+        backgroundColor: Colors.greenAccent,
+      ),
+    );
+  }
 
+  void _otvoritOfflineMapu(String kto) {
     showDialog(
       context: context,
       builder: (context) => AlertDialog(
-        title: Text(titulok, style: const TextStyle(color: Colors.amber)),
-        content: SingleChildScrollView(
-          child: Text(
-            rezultat,
-            style: const TextStyle(
-              fontFamily: 'monospace',
-              fontSize: 11,
-              height: 1.6,
+        title: Text('Offline Mapa - $kto'),
+        content: Container(
+          width: 300,
+          height: 200,
+          color: Colors.grey,
+          child: Center(
+            child: Column(
+              mainAxisAlignment: MainAxisAlignment.center,
+              children: [
+                const Icon(Icons.map, size: 48, color: Colors.greenAccent),
+                const SizedBox(height: 10),
+                const Text(
+                  'Nacitane offline dlazidce z disku',
+                  style: TextStyle(color: Colors.black, fontSize: 12),
+                ),
+                Text(
+                  kto == "Ja"
+                      ? "Lat: $_mojeLat, Lon: $_mojeLon"
+                      : "Lat: $_kamarandLat, Lon: $_kamarandLon",
+                  textAlign: TextAlign.center,
+                  style: const TextStyle(
+                    fontSize: 12,
+                    fontWeight: FontWeight.bold,
+                    color: Colors.black,
+                  ),
+                ),
+              ],
             ),
           ),
         ),
         actions: [
           TextButton(
             onPressed: () => Navigator.pop(context),
-            child: const Text('OK'),
+            child: const Text('Zatvorit'),
+          ),
+        ],
+      ),
+    );
+  }
+
+  void _zobrazitMazanieHistorie() {
+    showDialog(
+      context: context,
+      builder: (context) => AlertDialog(
+        title: const Text('Vymaz Historiu'),
+        content: const Text('Vyber co chces vymaza:'),
+        actions: [
+          TextButton(
+            onPressed: () {
+              setState(() {
+                HistoriaKontaktov.clearSifrovanaHistoria(widget.menoKamaranda);
+                HistoriaKontaktov.clearZobrazovaneSpravy(widget.menoKamaranda);
+              });
+              Navigator.pop(context);
+              ScaffoldMessenger.of(context).showSnackBar(
+                const SnackBar(
+                  content: Text('Cela historia bola vymazana'),
+                  backgroundColor: Colors.redAccent,
+                ),
+              );
+            },
+            child: const Text(
+              'Vymaz Vsetko',
+              style: TextStyle(color: Colors.redAccent),
+            ),
+          ),
+          TextButton(
+            onPressed: () {
+              int sedemDniMs = 7 * 24 * 60 * 60 * 1000;
+              int casLimit = DateTime.now().millisecondsSinceEpoch - sedemDniMs;
+
+              setState(() {
+                HistoriaKontaktov.removeWhereFromSifrovana(
+                  widget.menoKamaranda,
+                  (z) => z.casovy_razitko > casLimit,
+                );
+                HistoriaKontaktov.removeWhereFromZobrazovane(
+                  widget.menoKamaranda,
+                  (z) =>
+                      (z['casovy_razitko'] ??
+                          DateTime.now().millisecondsSinceEpoch) >
+                      casLimit,
+                );
+              });
+              Navigator.pop(context);
+              ScaffoldMessenger.of(context).showSnackBar(
+                const SnackBar(
+                  content: Text('Správy za posledných 7 dni boli vymazané'),
+                  backgroundColor: Colors.orangeAccent,
+                ),
+              );
+            },
+            child: const Text(
+              'Vymazať poslednich 7 Dní',
+              style: TextStyle(color: Colors.orangeAccent),
+            ),
+          ),
+          TextButton(
+            onPressed: () {
+              int jedanDenMs = 24 * 60 * 60 * 1000;
+              int casLimit = DateTime.now().millisecondsSinceEpoch - jedanDenMs;
+
+              setState(() {
+                HistoriaKontaktov.removeWhereFromSifrovana(
+                  widget.menoKamaranda,
+                  (z) => z.casovy_razitko > casLimit,
+                );
+                HistoriaKontaktov.removeWhereFromZobrazovane(
+                  widget.menoKamaranda,
+                  (z) =>
+                      (z['casovy_razitko'] ??
+                          DateTime.now().millisecondsSinceEpoch) >
+                      casLimit,
+                );
+              });
+              Navigator.pop(context);
+              ScaffoldMessenger.of(context).showSnackBar(
+                const SnackBar(
+                  content: Text('Správy za posledných 24 hodín boli vymazané'),
+                  backgroundColor: Colors.amberAccent,
+                ),
+              );
+            },
+            child: const Text(
+              'Vymazať posledných 24 Hodín',
+              style: TextStyle(color: Colors.amberAccent),
+            ),
+          ),
+          TextButton(
+            onPressed: () {
+              int jednaHodinaMs = 60 * 60 * 1000;
+              int casLimit =
+                  DateTime.now().millisecondsSinceEpoch - jednaHodinaMs;
+
+              setState(() {
+                HistoriaKontaktov.removeWhereFromSifrovana(
+                  widget.menoKamaranda,
+                  (z) => z.casovy_razitko > casLimit,
+                );
+                HistoriaKontaktov.removeWhereFromZobrazovane(
+                  widget.menoKamaranda,
+                  (z) =>
+                      (z['casovy_razitko'] ??
+                          DateTime.now().millisecondsSinceEpoch) >
+                      casLimit,
+                );
+              });
+              Navigator.pop(context);
+              ScaffoldMessenger.of(context).showSnackBar(
+                const SnackBar(
+                  content: Text('Správy za poslednú 1 hodinu boli vymazané'),
+                  backgroundColor: Colors.greenAccent,
+                ),
+              );
+            },
+            child: const Text(
+              'Vymazať poslednú 1 Hodinu',
+              style: TextStyle(color: Colors.greenAccent),
+            ),
+          ),
+          TextButton(
+            onPressed: () => Navigator.pop(context),
+            child: const Text('Zrusit', style: TextStyle(color: Colors.grey)),
+          ),
+        ],
+      ),
+    );
+  }
+
+  void _zobrazitHistoriu() {
+    final sifrovanaHistoria =
+        HistoriaKontaktov.getSifrovanaHistoria(widget.menoKamaranda);
+
+    showDialog(
+      context: context,
+      builder: (context) => AlertDialog(
+        title: const Text('Sifrovana Historia - AES-256'),
+        content: SizedBox(
+          width: 350,
+          height: 400,
+          child: sifrovanaHistoria.isEmpty
+              ? const Center(child: Text('Ziadna historia'))
+              : ListView.builder(
+                  itemCount: sifrovanaHistoria.length,
+                  itemBuilder: (context, index) {
+                    final zaznam = sifrovanaHistoria[index];
+                    final desifrovany = SifrovaciaSluzba.desifrovajAES(
+                      zaznam.sifrovanyObsah,
+                    );
+                    final desifrovanaPoloha = zaznam.sifrovanaPoloha.isNotEmpty
+                        ? SifrovaciaSluzba.desifrovajAES(zaznam.sifrovanaPoloha)
+                        : "";
+
+                    return Card(
+                      color: Colors.black38,
+                      child: Padding(
+                        padding: const EdgeInsets.all(8),
+                        child: Column(
+                          crossAxisAlignment: CrossAxisAlignment.start,
+                          children: [
+                            Text(
+                              '[${zaznam.smer}] ${zaznam.typ}',
+                              style: const TextStyle(
+                                fontWeight: FontWeight.bold,
+                                color: Colors.amberAccent,
+                              ),
+                            ),
+                            const SizedBox(height: 4),
+                            Text(
+                              'Obsah: $desifrovany',
+                              style: const TextStyle(fontSize: 11),
+                            ),
+                            if (zaznam.typ == "poloha" &&
+                                desifrovanaPoloha.isNotEmpty) ...[
+                              const SizedBox(height: 4),
+                              Text(
+                                'Poloha: $desifrovanaPoloha',
+                                style: const TextStyle(
+                                  fontSize: 10,
+                                  color: Colors.greenAccent,
+                                ),
+                              ),
+                            ],
+                            const SizedBox(height: 4),
+                            Text(
+                              'Hash: ${zaznam.hash.substring(0, 16)}...',
+                              style: const TextStyle(
+                                fontSize: 9,
+                                color: Colors.grey,
+                              ),
+                            ),
+                            Text(
+                              'Cas: ${_formatujCas(zaznam.casovy_razitko)}',
+                              style: const TextStyle(
+                                fontSize: 9,
+                                color: Colors.grey,
+                              ),
+                            ),
+                          ],
+                        ),
+                      ),
+                    );
+                  },
+                ),
+        ),
+        actions: [
+          TextButton(
+            onPressed: () => Navigator.pop(context),
+            child: const Text('Zatvorit'),
           ),
         ],
       ),
@@ -186,141 +1063,307 @@ class _TestDemoHistorieState extends State<TestDemoHistorie> {
 
   @override
   Widget build(BuildContext context) {
+    final zobrazovaneSpravy =
+        HistoriaKontaktov.getZobrazovaneSpravy(widget.menoKamaranda);
+
     return Scaffold(
       appBar: AppBar(
-        title: const Text('🧪 TEST: Mazanie histórie (bez hardvéru)'),
-        backgroundColor: Colors.deepPurple,
+        title: Column(
+          crossAxisAlignment: CrossAxisAlignment.start,
+          children: [
+            Text('Cet: ${widget.menoKamaranda}'),
+            Text(
+              'Vzdialenost: $_vzdialenostVListe',
+              style: const TextStyle(fontSize: 12, color: Colors.amberAccent),
+            ),
+          ],
+        ),
+        backgroundColor: Colors.blueGrey,
+        actions: [
+          IconButton(
+            icon: const Icon(Icons.delete, color: Colors.redAccent),
+            onPressed: _zobrazitMazanieHistorie,
+            tooltip: 'Vymaz historiu',
+          ),
+          IconButton(
+            icon: const Icon(Icons.history, color: Colors.lightBlueAccent),
+            onPressed: _zobrazitHistoriu,
+            tooltip: 'Sifrovana historia',
+          ),
+          IconButton(
+            icon: const Icon(Icons.radar, color: Colors.greenAccent),
+            onPressed: () => _simulujCudziPaket(49.5000, 2.9000, false, ""),
+          ),
+          IconButton(
+            icon: const Icon(Icons.radar, color: Colors.orangeAccent),
+            onPressed: () => _simulujCudziPaket(48.9500, 2.4500, false, ""),
+          ),
+        ],
       ),
       body: Column(
         children: [
-          Container(
-            padding: const EdgeInsets.all(16),
-            color: Colors.black45,
-            child: Column(
-              crossAxisAlignment: CrossAxisAlignment.start,
-              children: [
-                const Text(
-                  '📋 TEST DÁTOVÉ SADY:',
-                  style: TextStyle(
-                    fontWeight: FontWeight.bold,
-                    color: Colors.cyan,
-                    fontSize: 14,
-                  ),
-                ),
-                const SizedBox(height: 12),
-                ..._testSpravy.map((sp) {
-                  bool isStara = sp['cas'] < (DateTime.now().millisecondsSinceEpoch - (7 * 24 * 60 * 60 * 1000));
-                  return Padding(
-                    padding: const EdgeInsets.symmetric(vertical: 4),
-                    child: Row(
-                      children: [
-                        isStara
-                            ? const Icon(Icons.history, color: Colors.greenAccent, size: 16)
-                            : const Icon(Icons.new_releases, color: Colors.redAccent, size: 16),
-                        const SizedBox(width: 8),
-                        Expanded(
-                          child: Text(
-                            sp['obsah'],
-                            style: TextStyle(
-                              fontSize: 11,
-                              color: isStara ? Colors.greenAccent : Colors.redAccent,
+          Expanded(
+            child: zobrazovaneSpravy.isEmpty
+                ? const Center(
+                    child: Text(
+                      'Zatial ziadne spravy.\nKlikni na polohu aby ste zdielali polohu.',
+                    ),
+                  )
+                : ListView.builder(
+                    padding: const EdgeInsets.all(16),
+                    itemCount: zobrazovaneSpravy.length,
+                    itemBuilder: (context, index) {
+                      final msg = zobrazovaneSpravy[index];
+                      bool isOdoslana = msg['smer'] == "odoslana";
+                      bool isPoloha = msg['typ'] == "poloha";
+
+                      return Padding(
+                        padding: const EdgeInsets.symmetric(vertical: 4),
+                        child: Align(
+                          alignment: isOdoslana
+                              ? Alignment.centerRight
+                              : Alignment.centerLeft,
+                          child: Container(
+                            padding: const EdgeInsets.all(12),
+                            decoration: BoxDecoration(
+                              color: isPoloha
+                                  ? Colors.deepPurple
+                                  : (isOdoslana
+                                        ? Colors.blueAccent
+                                        : Colors.teal),
+                              borderRadius: BorderRadius.circular(12),
+                            ),
+                            child: Column(
+                              crossAxisAlignment: isOdoslana
+                                  ? CrossAxisAlignment.end
+                                  : CrossAxisAlignment.start,
+                              children: [
+                                Text(
+                                  msg['obsah']!,
+                                  style: const TextStyle(fontSize: 16),
+                                ),
+                                const SizedBox(height: 4),
+                                Text(
+                                  '${msg['sifra']!}',
+                                  style: const TextStyle(
+                                    fontSize: 8,
+                                    color: Colors.white60,
+                                    fontStyle: FontStyle.italic,
+                                  ),
+                                ),
+                                if (msg['casovy_razitko'] != null) ...[
+                                  const SizedBox(height: 4),
+                                  Text(
+                                    '${_formatujCas(msg['casovy_razitko'])}',
+                                    style: const TextStyle(
+                                      fontSize: 8,
+                                      color: Colors.white60,
+                                    ),
+                                  ),
+                                ],
+                                if (isPoloha) ...[
+                                  const SizedBox(height: 8),
+                                  ElevatedButton(
+                                    onPressed: () => _otvoritOfflineMapu(
+                                      isOdoslana ? "Ja" : widget.menoKamaranda,
+                                    ),
+                                    child: const Text('Zobraz mapu'),
+                                  ),
+                                ],
+                              ],
                             ),
                           ),
                         ),
-                      ],
-                    ),
-                  );
-                }).toList(),
-              ],
-            ),
+                      );
+                    },
+                  ),
           ),
-          const Divider(height: 1),
-          Expanded(
-            child: Padding(
-              padding: const EdgeInsets.all(20),
-              child: Column(
-                crossAxisAlignment: CrossAxisAlignment.stretch,
-                mainAxisAlignment: MainAxisAlignment.center,
-                children: [
-                  const Text(
-                    'Vyber možnosť mazania a vidz ktoré sprievania sa vymažú:',
-                    textAlign: TextAlign.center,
-                    style: TextStyle(fontSize: 14, fontWeight: FontWeight.w500),
+          Container(
+            padding: const EdgeInsets.all(8),
+            color: Colors.black26,
+            child: Row(
+              children: [
+                IconButton(
+                  icon: const Icon(
+                    Icons.location_on,
+                    color: Colors.amberAccent,
                   ),
-                  const SizedBox(height: 32),
-                  ElevatedButton.icon(
-                    onPressed: () => _mazanieTest('7dni'),
-                    icon: const Icon(Icons.delete_outline),
-                    label: const Text('TEST: Vymaž posledných 7 DNÍ'),
-                    style: ElevatedButton.styleFrom(
-                      backgroundColor: Colors.orangeAccent,
-                      foregroundColor: Colors.black,
-                      padding: const EdgeInsets.all(16),
-                      textStyle: const TextStyle(fontSize: 14, fontWeight: FontWeight.bold),
+                  onPressed: _odoslatPolohu,
+                  tooltip: 'Zdielaj polohu',
+                ),
+                Expanded(
+                  child: TextField(
+                    controller: _textController,
+                    decoration: const InputDecoration(
+                      hintText: 'Napis spravu...',
+                      border: InputBorder.none,
                     ),
                   ),
-                  const SizedBox(height: 16),
-                  ElevatedButton.icon(
-                    onPressed: () => _mazanieTest('24h'),
-                    icon: const Icon(Icons.delete_outline),
-                    label: const Text('TEST: Vymaž posledných 24 HODÍN'),
-                    style: ElevatedButton.styleFrom(
-                      backgroundColor: Colors.amberAccent,
-                      foregroundColor: Colors.black,
-                      padding: const EdgeInsets.all(16),
-                      textStyle: const TextStyle(fontSize: 14, fontWeight: FontWeight.bold),
-                    ),
-                  ),
-                  const SizedBox(height: 16),
-                  ElevatedButton.icon(
-                    onPressed: () => _mazanieTest('1h'),
-                    icon: const Icon(Icons.delete_outline),
-                    label: const Text('TEST: Vymaž poslednú 1 HODINU'),
-                    style: ElevatedButton.styleFrom(
-                      backgroundColor: Colors.greenAccent,
-                      foregroundColor: Colors.black,
-                      padding: const EdgeInsets.all(16),
-                      textStyle: const TextStyle(fontSize: 14, fontWeight: FontWeight.bold),
-                    ),
-                  ),
-                  const SizedBox(height: 32),
-                  Container(
-                    padding: const EdgeInsets.all(16),
-                    decoration: BoxDecoration(
-                      color: Colors.blue.withOpacity(0.15),
-                      border: Border.all(color: Colors.blueAccent, width: 2),
-                      borderRadius: BorderRadius.circular(8),
-                    ),
-                    child: const Column(
-                      crossAxisAlignment: CrossAxisAlignment.start,
-                      children: [
-                        Text(
-                          '✅ LOGIKA FUNGUJE SPRÁVNE!',
-                          style: TextStyle(
-                            color: Colors.greenAccent,
-                            fontWeight: FontWeight.bold,
-                            fontSize: 12,
-                          ),
-                        ),
-                        SizedBox(height: 8),
-                        Text(
-                          'Kód: removeWhere((z) => z.casovy_razitko > casLimit)\n\n'
-                          'Vysvetlenie:\n'
-                          '• casLimit = teraz - X dní/hodín\n'
-                          '• Ak casovy_razitko > casLimit = NOVÁ správa\n'
-                          '• Nové správy sa VYMAŽÚ ✓\n'
-                          '• Staré správy ostanú ZACHOVANÉ ✓',
-                          style: TextStyle(fontSize: 11, height: 1.5),
-                        ),
-                      ],
-                    ),
-                  ),
-                ],
-              ),
+                ),
+                IconButton(
+                  icon: const Icon(Icons.send, color: Colors.blueAccent),
+                  onPressed: () {
+                    if (_textController.text.trim().isEmpty) return;
+
+                    String sifrovanaSprava = SifrovaciaSluzba.sifrovajAES(
+                      _textController.text,
+                    );
+                    String hash = SifrovaciaSluzba.generujHash(
+                      _textController.text,
+                    );
+                    int casNow = DateTime.now().millisecondsSinceEpoch;
+
+                    SpravaZaznam zaznam = SpravaZaznam(
+                      id: _generujID(),
+                      sifrovanyObsah: sifrovanaSprava,
+                      sifrovanaPoloha: "",
+                      typ: "text",
+                      smer: "odoslana",
+                      casovy_razitko: casNow,
+                      hash: hash,
+                      kontakt: widget.menoKamaranda,
+                    );
+
+                    setState(() {
+                      HistoriaKontaktov.addSifrovanaSprava(
+                          widget.menoKamaranda, zaznam);
+                      HistoriaKontaktov.addZobrazovanaSprava(
+                        widget.menoKamaranda,
+                        {
+                          "typ": "text",
+                          "smer": "odoslana",
+                          "obsah": _textController.text,
+                          "sifra": sifrovanaSprava.substring(0, 30) + "...",
+                          "desifrovaneSifra": sifrovanaSprava,
+                          "casovy_razitko": casNow,
+                        },
+                      );
+                    });
+
+                    String textForResponse = _textController.text;
+                    _textController.clear();
+
+                    Future.delayed(const Duration(seconds: 1), () {
+                      if (mounted) {
+                        setState(() {
+                          String response = "Potvrdenie: Sprava prijata";
+                          String sifrovanaOdpoved =
+                              SifrovaciaSluzba.sifrovajAES(response);
+                          int casOdpovede =
+                              DateTime.now().millisecondsSinceEpoch;
+
+                          HistoriaKontaktov.addZobrazovanaSprava(
+                            widget.menoKamaranda,
+                            {
+                              "typ": "text",
+                              "smer": "prijata",
+                              "obsah": response,
+                              "sifra": sifrovanaOdpoved.substring(0, 30) + "...",
+                              "casovy_razitko": casOdpovede,
+                            },
+                          );
+
+                          SpravaZaznam zaznamOdpoved = SpravaZaznam(
+                            id: _generujID(),
+                            sifrovanyObsah: sifrovanaOdpoved,
+                            sifrovanaPoloha: "",
+                            typ: "text",
+                            smer: "prijata",
+                            casovy_razitko: casOdpovede,
+                            hash: SifrovaciaSluzba.generujHash(response),
+                            kontakt: widget.menoKamaranda,
+                          );
+                          HistoriaKontaktov.addSifrovanaSprava(
+                              widget.menoKamaranda, zaznamOdpoved);
+                        });
+                      }
+                    });
+                  },
+                ),
+              ],
             ),
           ),
         ],
       ),
+    );
+  }
+
+  void _simulujCudziPaket(double lat, double lon, bool cit, String obs) {
+    widget.onCudziPaketZachyteny({
+      "vzdialenost": _vypocitajVzdialenostCislo(_mojeLat, _mojeLon, lat, lon),
+      "citatelny": cit,
+      "obsah": obs,
+    });
+    ScaffoldMessenger.of(context).showSnackBar(
+      const SnackBar(
+        content: Text('Zachyteny neznamny radiovy paket!'),
+        backgroundColor: Colors.red,
+      ),
+    );
+  }
+
+  @override
+  void dispose() {
+    _textController.dispose();
+    super.dispose();
+  }
+}
+
+class ObrazovkaVystrah extends StatelessWidget {
+  final List<Map<String, dynamic>> vystrahy;
+  const ObrazovkaVystrah({super.key, required this.vystrahy});
+
+  @override
+  Widget build(BuildContext context) {
+    return Scaffold(
+      appBar: AppBar(
+        title: const Text('Radar: Nezname signaly'),
+        backgroundColor: const Color(0xFFB71C1C),
+      ),
+      body: vystrahy.isEmpty
+          ? const Center(child: Text('V eteri je pokoj.'))
+          : ListView.builder(
+              padding: const EdgeInsets.all(16),
+              itemCount: vystrahy.length,
+              itemBuilder: (context, index) {
+                final v = vystrahy[index];
+                double dist = v["vzdialenost"];
+                bool cit = v["citatelny"];
+                Color farba = dist <= 15
+                    ? Colors.redAccent
+                    : (dist <= 50 ? Colors.orangeAccent : Colors.greenAccent);
+
+                return Card(
+                  color: Colors.black38,
+                  child: Padding(
+                    padding: const EdgeInsets.all(12),
+                    child: Column(
+                      crossAxisAlignment: CrossAxisAlignment.start,
+                      children: [
+                        Row(
+                          mainAxisAlignment: MainAxisAlignment.spaceBetween,
+                          children: [
+                            const Text('Signal'),
+                            Text(
+                              '${dist.toStringAsFixed(2)} km',
+                              style: TextStyle(
+                                color: farba,
+                                fontWeight: FontWeight.bold,
+                              ),
+                            ),
+                          ],
+                        ),
+                        const SizedBox(height: 8),
+                        Text(
+                          cit ? 'Obsah: "${v["obsah"]}"' : 'Paket je sifrovany',
+                          style: TextStyle(color: farba),
+                        ),
+                      ],
+                    ),
+                  ),
+                );
+              },
+            ),
     );
   }
 }
